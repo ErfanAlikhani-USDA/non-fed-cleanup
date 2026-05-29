@@ -1,0 +1,29 @@
+resources:
+  jobs:
+    non_fed_cleanup_daily_ingest:
+      name: SharePoint Non-Fed Cleanup Daily Ingest
+      description: >
+        Downloads Non-Fed Cleanup files from SharePoint, writes to bronze Delta tables,
+        cleanses and promotes to gold hr schema.
+      schedule:
+        quartz_cron_expression: "0 0 8 ? * * *"
+        timezone_id: America/New_York
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+
+      environments:
+        - environment_key: Default
+          spec:
+            client: "2"
+            dependencies:
+              - xlrd
+              - openpyxl
+
+      tasks:
+        - task_key: non_fed_cleanup
+          environment_key: Default
+          notebook_task:
+            notebook_path: ../src/non_fed_cleanup.py
+            source: WORKSPACE

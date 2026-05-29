@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=bundle_config_schema.json
+
+bundle:
+  name: ree_sharepoint_non_fed_cleanup
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog name
+    default: ree_edapt
+  bronze_schema:
+    description: Schema for bronze tables
+    default: hr_bronze
+  gold_schema:
+    description: Schema for gold tables
+    default: hr
+
+targets:
+  dev:
+    default: true
+    presets:
+      name_prefix: "[dev] "
+    workspace:
+      host: https://dbc-c5bad5e5-3e9c.cloud.databricks.com
+
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-c5bad5e5-3e9c.cloud.databricks.com
+    run_as:
+      user_name: erfan.alikhani@usda.gov
