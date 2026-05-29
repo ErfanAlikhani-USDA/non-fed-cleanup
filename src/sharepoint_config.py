@@ -1,3 +1,4 @@
+# Databricks notebook source
 # SharePoint Configuration
 SP_DOMAIN = "usdagcc.sharepoint.com"
 FOLDER_PREFIX = "/sites/REE-ARS-DAAFMDataTeam/HRD"
@@ -33,3 +34,4 @@ COLUMN_SELECTION = {
         "Expire_Date", "Justify", "Description"
     ],
 }
+
