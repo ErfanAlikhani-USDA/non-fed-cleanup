@@ -4,7 +4,7 @@ resources:
       name: SharePoint Non-Fed Cleanup Daily Ingest
       description: >
         Downloads Non-Fed Cleanup files from SharePoint, writes to bronze Delta tables,
-        cleanses and promotes to gold hr schema.
+        cleanses and promotes to silver, then refreshes the gold materialized view.
       schedule:
         quartz_cron_expression: "0 0 8 ? * * *"
         timezone_id: America/New_York
@@ -22,8 +22,16 @@ resources:
               - openpyxl
 
       tasks:
-        - task_key: non_fed_cleanup
+        # Task 1: SharePoint -> Bronze -> Silver (classic cluster)
+        - task_key: bronze_silver_ingest
           environment_key: Default
           notebook_task:
             notebook_path: ../src/non_fed_cleanup.py
             source: WORKSPACE
+
+        # Task 2: Silver -> Gold materialized view (SDP pipeline)
+        - task_key: gold_materialized_view
+          depends_on:
+            - task_key: bronze_silver_ingest
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.nonfed_gold_pipeline.id}

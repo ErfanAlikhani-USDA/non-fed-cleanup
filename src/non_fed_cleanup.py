@@ -82,12 +82,12 @@ def sanitize_column_name(col):
 
 # COMMAND ----------
 
-# DBTITLE 1,Ingest new/modified files to Delta bronze
+# DBTITLE 1,SharePoint to Bronze
 import os
 import csv
 import pandas as pd
 
-# --- Main ingestion job ---
+# --- SharePoint to Bronze: download and write raw Delta tables ---
 client_id = dbutils.secrets.get(scope="ree-edapt", key="SP_ID")
 client_secret = dbutils.secrets.get(scope="ree-edapt", key="SP_SECRET")
 
@@ -166,13 +166,25 @@ else:
         try:
             if name.lower().endswith(".csv"):
                 pdf = pd.read_csv(staging_path)
-            elif name.lower().endswith((".xls", ".xlsx")):
+            elif name.lower().endswith(".xlsx"):
+                pdf = pd.read_excel(staging_path, header=0)
+            elif name.lower().endswith(".xls"):
                 pdf = pd.read_excel(staging_path, header=1)
             else:
                 pdf = pd.read_csv(staging_path)
 
             # Drop fully empty columns
             pdf = pdf.dropna(axis=1, how='all')
+
+            # Drop 'Unnamed' columns (artifacts from Excel)
+            unnamed_cols = [c for c in pdf.columns if 'unnamed' in str(c).lower()]
+            if unnamed_cols:
+                pdf = pdf.drop(columns=unnamed_cols)
+                print(f"    Dropped {len(unnamed_cols)} unnamed columns")
+
+            # Convert all object columns to string to avoid Arrow conversion errors
+            for c in pdf.select_dtypes(include=['object']).columns:
+                pdf[c] = pdf[c].astype(str).replace('nan', None)
 
             # Sanitize column names for Delta compatibility
             pdf.columns = [sanitize_column_name(str(col)) for col in pdf.columns]
@@ -235,52 +247,74 @@ else:
 
 # COMMAND ----------
 
-# DBTITLE 1,Bronze to Gold (cleanse + promote to hr schema)
-from pyspark.sql.functions import current_timestamp, trim, col
+# DBTITLE 1,Bronze to Silver (cleanse + union USAccess + promote to hr_silver)
+from pyspark.sql.functions import current_timestamp, trim, col, lit
+from functools import reduce
 
-# --- Bronze to Gold: cleanse and promote to hr schema ---
-for bronze_table, gold_suffix in FILE_PATTERN_MAPPING.items():
-    # Bronze table name (with _bronze)
-    bronze_full = f"{TARGET_CATALOG}.{BRONZE_SCHEMA}.{gold_suffix}"
-    # Gold table name (without _bronze)
-    gold_table_name = gold_suffix.replace("_bronze", "")
-    gold_full = f"{TARGET_CATALOG}.{GOLD_SCHEMA}.{gold_table_name}"
+# --- Bronze to Silver: cleanse and promote ---
 
-    print(f"\n  {bronze_full} -> {gold_full}")
+# Step 1: Promote EmpowHR contractor to silver
+empowhr_bronze = f"{TARGET_CATALOG}.{BRONZE_SCHEMA}.ree_empowhr_contractor_bronze"
+empowhr_silver = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.ree_empowhr_contractor"
 
+print(f"  {empowhr_bronze} -> {empowhr_silver}")
+try:
+    df = spark.read.table(empowhr_bronze)
+    selected_cols = COLUMN_SELECTION.get("ree_empowhr_contractor_bronze", [])
+    if selected_cols:
+        available = set(df.columns)
+        valid_cols = [c for c in selected_cols if c in available]
+        df = df.select(valid_cols)
+
+    # Trim string columns
+    schema_fields = df.schema.fields
+    for field in schema_fields:
+        if str(field.dataType) == "StringType":
+            df = df.withColumn(field.name, trim(col(field.name)))
+
+    df = df.dropna(how="all").withColumn("ingest_date", current_timestamp())
+    df.write.mode("overwrite").option("mergeSchema", "true").saveAsTable(empowhr_silver)
+    print(f"    \u2713 Written ({df.count():,} rows)")
+except Exception as e:
+    print(f"    \u2717 Failed: {e}")
+
+# Step 2: UNION all USAccess mission area bronze tables into one silver table
+usaccess_silver = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.ree_usaccess_applicant_status"
+
+print(f"\n  UNION USAccess bronze tables -> {usaccess_silver}")
+dfs = []
+for tbl_name in USACCESS_BRONZE_TABLES:
+    full_name = f"{TARGET_CATALOG}.{BRONZE_SCHEMA}.{tbl_name}"
+    # Check if table exists before reading
+    if not spark.catalog.tableExists(full_name):
+        print(f"    \u26a0 {full_name}: table does not exist yet, skipping")
+        continue
     try:
-        df = spark.read.table(bronze_full)
-
-        # Select columns if specified, otherwise keep all
-        selected_cols = COLUMN_SELECTION.get(gold_suffix, [])
-        if selected_cols:
-            # Only keep columns that exist in the DataFrame
-            available = set(df.columns)
-            valid_cols = [c for c in selected_cols if c in available]
-            missing = [c for c in selected_cols if c not in available]
-            if missing:
-                print(f"    WARNING: columns not found: {missing}")
-            df = df.select(valid_cols)
-
-        # Data cleansing: trim whitespace from string columns
-        for field in df.schema.fields:
-            if str(field.dataType) == "StringType":
-                df = df.withColumn(field.name, trim(col(field.name)))
-
-        # Drop fully null rows
-        df = df.dropna(how="all")
-
-        # Add ingest timestamp
-        df = df.withColumn("ingest_date", current_timestamp())
-
-        # Write to gold
-        df.write.mode("overwrite").option("mergeSchema", "true").saveAsTable(gold_full)
-
-        row_count = df.count()
-        print(f"    \u2713 Written to {gold_full} ({row_count:,} rows)")
-
+        tdf = spark.read.table(full_name)
+        # Add mission_area column from table name (e.g., ree_usaccess_ars_bronze -> ARS)
+        mission_area = tbl_name.replace("ree_usaccess_", "").replace("_bronze", "").upper()
+        tdf = tdf.withColumn("mission_area", lit(mission_area))
+        row_count = tdf.count()
+        dfs.append(tdf)
+        print(f"    \u2713 {full_name} ({row_count:,} rows, mission_area={mission_area})")
     except Exception as e:
-        print(f"    \u2717 Failed: {e}")
+        print(f"    \u2717 {full_name}: {e}")
+
+if dfs:
+    # Union all by name (handles column order differences)
+    combined = reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), dfs)
+
+    # Trim string columns
+    schema_fields = combined.schema.fields
+    for field in schema_fields:
+        if str(field.dataType) == "StringType":
+            combined = combined.withColumn(field.name, trim(col(field.name)))
+
+    combined = combined.dropna(how="all").withColumn("ingest_date", current_timestamp())
+    combined.write.mode("overwrite").option("mergeSchema", "true").saveAsTable(usaccess_silver)
+    print(f"\n    \u2713 Written to {usaccess_silver} ({combined.count():,} rows total)")
+else:
+    print("    \u2717 No USAccess tables found")
 
 print(f"\n{'='*60}")
-print("Bronze to Gold complete")
+print("Bronze to Silver complete")

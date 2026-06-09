@@ -13,9 +13,13 @@ variables:
   bronze_schema:
     description: Schema for bronze tables
     default: hr_bronze
+  silver_schema:
+    description: Schema for silver tables
+    default: hr_silver
   gold_schema:
     description: Schema for gold tables
     default: hr
+
 
 targets:
   dev:

@@ -1,0 +1,22 @@
+resources:
+  pipelines:
+    nonfed_gold_pipeline:
+      name: "Non-Fed Cleanup Gold Pipeline"
+
+      # Output to gold schema
+      catalog: ${var.catalog}
+      target: ${var.gold_schema}
+
+      # Source SQL file for the materialized view
+      libraries:
+        - file:
+            path: ../src/gold_pipeline.sql
+
+      # Serverless for SQL warehouse-like behavior
+      serverless: true
+      photon: true
+
+      # Triggered mode - refreshes when run (not continuous)
+      continuous: false
+      development: true
+      channel: current
