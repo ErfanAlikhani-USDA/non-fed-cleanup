@@ -6,7 +6,13 @@
 # COMMAND ----------
 
 # DBTITLE 1,Load config
-# MAGIC %run ./sharepoint_config
+import os
+
+# Dynamically resolve sharepoint_config — works in both dev and prod
+_ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+_this_dir = os.path.dirname(_ctx.notebookPath().get())
+_config_path = f"/Workspace{_this_dir}/sharepoint_config"
+get_ipython().run_line_magic("run", _config_path)
 
 # COMMAND ----------
 

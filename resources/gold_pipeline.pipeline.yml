@@ -20,3 +20,7 @@ resources:
       continuous: false
       development: true
       channel: current
+
+      permissions:
+        - level: CAN_RUN
+          service_principal_name: d8d72d2d-c931-40df-a836-67d884f4522f

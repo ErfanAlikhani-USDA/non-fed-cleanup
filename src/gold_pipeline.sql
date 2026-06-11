@@ -26,7 +26,8 @@ empowhr_clean AS (
       ELSE 'Inactive'
     END AS EmpowHR_Status,
     COUNT(*) OVER (PARTITION BY CAST(ID AS INT)) AS emplid_count,
-    CASE WHEN COUNT(*) OVER (PARTITION BY CAST(ID AS INT)) > 1 THEN 1 ELSE 0 END AS is_duplicate_emplid
+    CASE WHEN COUNT(*) OVER (PARTITION BY CAST(ID AS INT)) > 1 THEN 1 ELSE 0 END AS is_duplicate_emplid,
+    ingest_date AS empowhr_ingest_date
   FROM ree_edapt.hr_silver.ree_empowhr_contractor
 ),
 
@@ -49,7 +50,8 @@ usaccess_clean AS (
            'CARD PRINTING IN PROCESS','CARD DELIVERED',
            'CREDENTIAL IN TRANSIT','PRINTING COMPLETE') THEN 'Active'
       ELSE 'Unknown'
-    END AS PIV_Status
+    END AS PIV_Status,
+    ingest_date AS usaccess_ingest_date
   FROM ree_edapt.hr_silver.ree_usaccess_applicant_status
 ),
 
@@ -66,7 +68,8 @@ ad_clean AS (
     CASE
       WHEN accountdisabled = 'Disabled' THEN 'Disabled'
       ELSE 'Active'
-    END AS AD_Account_Status
+    END AS AD_Account_Status,
+    ingest_date AS ad_ingest_date
   FROM ree_edapt.ree.ree_active_directory
   WHERE employeeid IS NOT NULL
     AND employeeid != ''
@@ -86,6 +89,7 @@ master_join AS (
     e.EmpowHR_Status,
     e.emplid_count          AS empowhr_duplicate_count,
     e.is_duplicate_emplid,
+    e.empowhr_ingest_date,
     u.Last_Name,
     u.First_Name,
     u.Org_Association_Category,
@@ -94,12 +98,14 @@ master_join AS (
     u.PIV_Status,
     u.UPN,
     u.mission_area,
+    u.usaccess_ingest_date,
     a.displayname,
     a.samaccountname,
     a.ad_description,
     a.lastlogon,
     a.accountlastmodified,
     a.AD_Account_Status,
+    a.ad_ingest_date,
     CASE WHEN u.emplid IS NULL THEN 1 ELSE 0 END AS missing_usaccess,
     CASE WHEN a.emplid IS NULL THEN 1 ELSE 0 END AS missing_ad
   FROM empowhr_clean e
@@ -182,5 +188,8 @@ SELECT
   missing_usaccess,
   missing_ad,
   is_duplicate_emplid,
-  empowhr_duplicate_count
+  empowhr_duplicate_count,
+  empowhr_ingest_date,
+  usaccess_ingest_date,
+  ad_ingest_date
 FROM master_classified;

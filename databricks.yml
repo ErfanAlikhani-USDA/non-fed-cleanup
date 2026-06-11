@@ -28,10 +28,12 @@ targets:
       name_prefix: "[dev] "
     workspace:
       host: https://dbc-c5bad5e5-3e9c.cloud.databricks.com
+    run_as:
+      service_principal_name: d8d72d2d-c931-40df-a836-67d884f4522f
 
   prod:
     mode: production
     workspace:
       host: https://dbc-c5bad5e5-3e9c.cloud.databricks.com
     run_as:
-      user_name: erfan.alikhani@usda.gov
+      service_principal_name: d8d72d2d-c931-40df-a836-67d884f4522f
